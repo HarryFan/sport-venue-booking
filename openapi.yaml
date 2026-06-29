@@ -1,0 +1,890 @@
+openapi: 3.1.0
+info:
+  title: 場館預約系統 API
+  description: |
+    台灣社區/校園運動場館預約平台。
+    支援 LINE Login 登入、LINE Pay / 街口支付，
+    學生 .edu.tw 信箱認證及 65 歲以上敬老優惠。
+  version: 1.0.0
+  contact:
+    name: Harry Fan
+    url: https://github.com/HarryFan/sport-venue-booking
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: 本機開發
+  - url: https://sport-venue-booking.vercel.app/api/v1
+    description: Vercel Preview
+
+tags:
+  - name: auth
+    description: 登入 / 身份驗證
+  - name: venues
+    description: 場館與時段
+  - name: bookings
+    description: 預約訂單
+  - name: payments
+    description: 支付
+  - name: certifications
+    description: 身份認證（學生 / 教職員 / 敬老）
+  - name: users
+    description: 使用者個人資料
+
+# ──────────────────────────────────────────────
+# Paths
+# ──────────────────────────────────────────────
+paths:
+
+  # ── Auth ──────────────────────────────────
+  /auth/line-login:
+    post:
+      tags: [auth]
+      summary: LINE Login 換取 JWT
+      description: 前端取得 LINE code 後送至此換取系統 JWT。
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+                  description: LINE Login OAuth2 authorization code
+                  example: "abc123xyz"
+      responses:
+        "200":
+          description: 登入成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /auth/otp/send:
+    post:
+      tags: [auth]
+      summary: 發送手機 OTP（簡訊驗證碼）
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone]
+              properties:
+                phone:
+                  type: string
+                  pattern: "^09[0-9]{8}$"
+                  example: "0912345678"
+      responses:
+        "200":
+          description: OTP 已發送
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  expires_in:
+                    type: integer
+                    description: OTP 有效秒數
+                    example: 300
+
+  /auth/otp/verify:
+    post:
+      tags: [auth]
+      summary: 驗證手機 OTP 並換取 JWT
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phone, code]
+              properties:
+                phone:
+                  type: string
+                  example: "0912345678"
+                code:
+                  type: string
+                  minLength: 6
+                  maxLength: 6
+                  example: "123456"
+      responses:
+        "200":
+          description: 驗證成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "422":
+          $ref: "#/components/responses/UnprocessableEntity"
+
+  # ── Venues ────────────────────────────────
+  /venues:
+    get:
+      tags: [venues]
+      summary: 取得場館列表（含今日可用時段摘要）
+      parameters:
+        - name: category
+          in: query
+          schema:
+            $ref: "#/components/schemas/VenueCategory"
+        - name: date
+          in: query
+          description: "查詢日期，格式 YYYY-MM-DD，預設今天"
+          schema:
+            type: string
+            format: date
+            example: "2026-06-29"
+      responses:
+        "200":
+          description: 場館列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/VenueSummary"
+
+  /venues/{venue_id}:
+    get:
+      tags: [venues]
+      summary: 取得單一場館詳細資訊
+      parameters:
+        - $ref: "#/components/parameters/VenueId"
+      responses:
+        "200":
+          description: 場館詳情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Venue"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /venues/{venue_id}/slots:
+    get:
+      tags: [venues]
+      summary: 查詢場館時段列表及剩餘名額
+      parameters:
+        - $ref: "#/components/parameters/VenueId"
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+            example: "2026-06-29"
+      responses:
+        "200":
+          description: 時段列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/TimeSlot"
+
+  /venues/{venue_id}/floor-plan:
+    get:
+      tags: [venues]
+      summary: 取得場地平面圖 URL
+      parameters:
+        - $ref: "#/components/parameters/VenueId"
+      responses:
+        "200":
+          description: 平面圖資訊
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    format: uri
+
+  # ── Bookings ──────────────────────────────
+  /bookings:
+    get:
+      tags: [bookings]
+      summary: 我的訂單列表
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum:
+              - pending_payment
+              - paid
+              - completed
+              - cancelled
+              - all
+            default: all
+        - name: cursor
+          in: query
+          description: 游標分頁（上一頁最後一筆訂單的 created_at ISO 時間）
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        "200":
+          description: 訂單列表
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Booking"
+                  next_cursor:
+                    type: string
+                    nullable: true
+
+    post:
+      tags: [bookings]
+      summary: 建立預約（佔位並鎖定時段，回傳待支付訂單）
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [time_slot_id]
+              properties:
+                time_slot_id:
+                  type: string
+                  format: uuid
+                participant_count:
+                  type: integer
+                  minimum: 1
+                  default: 1
+      responses:
+        "201":
+          description: 預約建立成功（待支付）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "409":
+          description: 時段已滿或重複預約
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              examples:
+                slot_full:
+                  value:
+                    code: SLOT_FULL
+                    message: 該時段名額已滿
+                duplicate:
+                  value:
+                    code: BOOKING_DUPLICATE
+                    message: 您已預約此時段
+
+  /bookings/{booking_id}:
+    get:
+      tags: [bookings]
+      summary: 訂單詳情
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "200":
+          description: 訂單詳情
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /bookings/{booking_id}/cancel:
+    post:
+      tags: [bookings]
+      summary: 取消訂單（並觸發退款）
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+                  maxLength: 200
+      responses:
+        "200":
+          description: 取消成功
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Booking"
+        "422":
+          description: 超過取消時限或訂單狀態不允許
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /bookings/{booking_id}/qr:
+    get:
+      tags: [bookings]
+      summary: 取得驗票 QR 碼內容
+      description: |
+        回傳 base64 QR 圖片及 token，供前端顯示入場核驗碼。
+        僅 status=paid 的訂單可取得，QR 有效期至場次結束。
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      responses:
+        "200":
+          description: QR 碼資訊
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRCode"
+        "403":
+          description: 訂單尚未付款或已失效
+
+  # ── Payments ──────────────────────────────
+  /bookings/{booking_id}/pay:
+    post:
+      tags: [payments]
+      summary: 發起支付
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/BookingId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel]
+              properties:
+                channel:
+                  type: string
+                  enum: [stored_value, line_pay, jkopay, apple_pay, credit_card]
+                  description: |
+                    stored_value = 儲值點數（同步完成）
+                    line_pay / jkopay / apple_pay / credit_card = 導向第三方（回傳 payment_url）
+      responses:
+        "200":
+          description: 支付發起結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentResponse"
+
+  /payments/callback/line-pay:
+    post:
+      tags: [payments]
+      summary: LINE Pay 非同步回調（僅供 LINE Pay 伺服器呼叫）
+      description: 驗簽後更新訂單狀態，需在 5 秒內回應 200。
+      responses:
+        "200":
+          description: 回調處理成功
+
+  /payments/callback/jkopay:
+    post:
+      tags: [payments]
+      summary: 街口支付非同步回調
+      responses:
+        "200":
+          description: 回調處理成功
+
+  # ── Certifications ────────────────────────
+  /certifications:
+    post:
+      tags: [certifications]
+      summary: 提交身份認證申請
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CertificationRequest"
+      responses:
+        "201":
+          description: 申請提交成功（審核中）
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Certification"
+        "409":
+          description: 已有待審核或有效認證
+
+  /certifications/me:
+    get:
+      tags: [certifications]
+      summary: 查詢我的認證狀態
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 認證狀態
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Certification"
+
+  # ── Users ─────────────────────────────────
+  /users/me:
+    get:
+      tags: [users]
+      summary: 取得個人資料（含餘額、認證狀態、優惠券數）
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: 個人資料
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserProfile"
+
+  # ── Admin ─────────────────────────────────
+  /admin/qr-verify:
+    post:
+      tags: [bookings]
+      summary: 管理員掃碼核驗入場
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [qr_token]
+              properties:
+                qr_token:
+                  type: string
+      responses:
+        "200":
+          description: 核驗結果
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/QRVerifyResult"
+        "404":
+          description: 無效的 QR Token
+        "409":
+          description: 此 QR 已使用或已過期
+
+# ──────────────────────────────────────────────
+# Components
+# ──────────────────────────────────────────────
+components:
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    VenueId:
+      name: venue_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    BookingId:
+      name: booking_id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  responses:
+    Unauthorized:
+      description: 未授權（請先登入）
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: 資源不存在
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnprocessableEntity:
+      description: 資料驗證失敗
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+
+  schemas:
+
+    # ── Enums ──────────────────────────────
+    VenueCategory:
+      type: string
+      enum:
+        - morning_exercise
+        - basketball
+        - badminton
+        - swimming
+        - table_tennis
+        - tennis
+      description: |
+        morning_exercise = 晨間運動
+        basketball = 籃球
+        badminton = 羽球
+        swimming = 游泳
+        table_tennis = 桌球
+        tennis = 網球
+
+    BookingStatus:
+      type: string
+      enum:
+        - pending_payment
+        - paid
+        - in_use
+        - completed
+        - cancelled
+        - refunding
+        - refunded
+
+    CertType:
+      type: string
+      enum:
+        - student
+        - faculty
+        - senior
+      description: |
+        student = 學生（.edu.tw 信箱或學生證）
+        faculty = 教職員（工作信箱或工作證）
+        senior  = 敬老（65 歲以上，身分證 DOB）
+
+    PaymentChannel:
+      type: string
+      enum:
+        - stored_value
+        - line_pay
+        - jkopay
+        - apple_pay
+        - credit_card
+
+    # ── Auth ───────────────────────────────
+    AuthResponse:
+      type: object
+      properties:
+        token:
+          type: string
+          description: JWT（7 天有效）
+        user:
+          $ref: "#/components/schemas/UserProfile"
+
+    # ── User ───────────────────────────────
+    UserProfile:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        nickname:
+          type: string
+          example: 陳大明
+        avatar_url:
+          type: string
+          format: uri
+        phone:
+          type: string
+          example: "0912****678"
+          description: 顯示時已 mask
+        stored_value_twd:
+          type: number
+          description: 儲值餘額（新台幣）
+          example: 250.0
+        coupon_count:
+          type: integer
+          example: 3
+        active_cert_type:
+          $ref: "#/components/schemas/CertType"
+          nullable: true
+        cert_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    # ── Venue ──────────────────────────────
+    VenueSummary:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+          example: 籃球一號館
+        category:
+          $ref: "#/components/schemas/VenueCategory"
+        today_available_slots:
+          type: integer
+          description: 今日剩餘可預約場次數
+          example: 3
+        earliest_available_time:
+          type: string
+          description: 今日最早可預約時段
+          example: "08:00"
+          nullable: true
+        price_normal_twd:
+          type: number
+          example: 150
+        price_student_twd:
+          type: number
+          example: 0
+        price_senior_twd:
+          type: number
+          example: 75
+
+    Venue:
+      allOf:
+        - $ref: "#/components/schemas/VenueSummary"
+        - type: object
+          properties:
+            building:
+              type: string
+              example: 綜合體育館
+            description:
+              type: string
+              example: 標準籃球場，木質地板，配備 LED 照明
+            max_capacity:
+              type: integer
+              example: 10
+            floor_plan_url:
+              type: string
+              format: uri
+            status:
+              type: string
+              enum: [open, maintenance, closed]
+
+    # ── TimeSlot ───────────────────────────
+    TimeSlot:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        venue_id:
+          type: string
+          format: uuid
+        date:
+          type: string
+          format: date
+          example: "2026-06-29"
+        start_time:
+          type: string
+          example: "08:00"
+        end_time:
+          type: string
+          example: "09:00"
+        status:
+          type: string
+          enum: [available, full, closed]
+        remaining_capacity:
+          type: integer
+          example: 4
+        price_twd:
+          type: number
+          description: 依當前登入使用者的認證身份回傳對應價格
+          example: 0
+
+    # ── Booking ────────────────────────────
+    Booking:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        order_no:
+          type: string
+          example: BK20260629A1B2C3
+        user_id:
+          type: string
+          format: uuid
+        venue:
+          $ref: "#/components/schemas/VenueSummary"
+        time_slot:
+          $ref: "#/components/schemas/TimeSlot"
+        status:
+          $ref: "#/components/schemas/BookingStatus"
+        amount_twd:
+          type: number
+          example: 150
+        final_amount_twd:
+          type: number
+          example: 0
+          description: 實際支付金額（學生可為 0）
+        cert_type_snapshot:
+          $ref: "#/components/schemas/CertType"
+          nullable: true
+        payment_expires_at:
+          type: string
+          format: date-time
+          description: 支付截止時間（建立後 15 分鐘）
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ── Payment ────────────────────────────
+    PaymentResponse:
+      type: object
+      properties:
+        channel:
+          $ref: "#/components/schemas/PaymentChannel"
+        status:
+          type: string
+          enum: [completed, redirect_required]
+        payment_url:
+          type: string
+          format: uri
+          nullable: true
+          description: LINE Pay / 街口等第三方支付頁 URL，stored_value 時為 null
+        booking:
+          $ref: "#/components/schemas/Booking"
+
+    # ── QR Code ────────────────────────────
+    QRCode:
+      type: object
+      properties:
+        qr_token:
+          type: string
+          description: 核驗碼 token（用於 /admin/qr-verify）
+        qr_base64:
+          type: string
+          description: Base64 PNG 圖片，前端直接塞進 <img src>
+        expires_at:
+          type: string
+          format: date-time
+          description: QR 碼有效期（場次結束時間）
+
+    QRVerifyResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        user_name:
+          type: string
+          example: 陳大明
+        venue_name:
+          type: string
+          example: 籃球一號館
+        slot_time:
+          type: string
+          example: "2026-06-29 08:00–09:00"
+        cert_type:
+          $ref: "#/components/schemas/CertType"
+          nullable: true
+        already_used:
+          type: boolean
+
+    # ── Certification ──────────────────────
+    CertificationRequest:
+      type: object
+      required: [cert_type]
+      properties:
+        cert_type:
+          $ref: "#/components/schemas/CertType"
+        real_name:
+          type: string
+          example: 陳大明
+        student_id:
+          type: string
+          description: 學號（student / faculty 時必填）
+          example: "B10234567"
+        edu_email:
+          type: string
+          format: email
+          description: 學校/機構 .edu.tw 信箱（可選，用於自動驗證）
+          example: "b10234567@mail.ntust.edu.tw"
+        cert_image_key:
+          type: string
+          description: 上傳至 S3/Storage 後取得的 object key（學生證/工作證圖片）
+        birth_year:
+          type: integer
+          description: 出生年份（senior 必填，用於確認 65 歲以上）
+          example: 1955
+
+    Certification:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        cert_type:
+          $ref: "#/components/schemas/CertType"
+        status:
+          type: string
+          enum: [pending, approved, rejected, expired]
+        review_note:
+          type: string
+          nullable: true
+          description: 審核備注（拒絕原因）
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: "null = 永久有效（敬老）；學生每年需續期"
+        created_at:
+          type: string
+          format: date-time
+
+    # ── Error ──────────────────────────────
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: 機器可讀錯誤碼
+          example: SLOT_FULL
+        message:
+          type: string
+          description: 人可讀錯誤訊息（繁中）
+          example: 該時段名額已滿
+        request_id:
+          type: string
+          description: 追蹤用 ID
