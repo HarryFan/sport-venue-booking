@@ -1,65 +1,86 @@
-import Image from "next/image";
+'use client'
+import { useState, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
+import Link from 'next/link'
+import BlurText from '@/components/BlurText'
+import SpotlightCard from '@/components/SpotlightCard'
+import CountUp from '@/components/CountUp'
+import { getVenues } from '@/lib/mock-api'
+import { Venue, VenueCategory } from '@/lib/types'
 
-export default function Home() {
+const SPORT_ICONS: { category: VenueCategory; label: string; emoji: string }[] = [
+  { category: 'basketball', label: '籃球', emoji: '🏀' },
+  { category: 'badminton', label: '羽球', emoji: '🏸' },
+  { category: 'swimming', label: '游泳', emoji: '🏊' },
+  { category: 'table_tennis', label: '桌球', emoji: '🏓' },
+  { category: 'tennis', label: '網球', emoji: '🎾' },
+  { category: 'morning_exercise', label: '晨間運動', emoji: '🌅' },
+]
+
+export default function HomePage() {
+  const router = useRouter()
+  const [venues, setVenues] = useState<Venue[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    getVenues().then((v) => { setVenues(v.slice(0, 4)); setLoading(false) })
+  }, [])
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
+    <div className="min-h-screen px-4 py-6 space-y-8">
+      <div className="pt-4 pb-2 space-y-1">
+        <BlurText text="輕鬆預約，隨時運動" className="text-2xl font-bold text-white" delay={80} />
+        <p className="text-gray-400 text-sm">台北市・新北市社區運動中心</p>
+      </div>
+
+      <section>
+        <h2 className="text-xs font-medium text-gray-400 mb-3 uppercase tracking-wider">我要預約</h2>
+        <div className="grid grid-cols-3 gap-3">
+          {SPORT_ICONS.map(({ category, label, emoji }) => (
+            <button
+              key={category}
+              onClick={() => router.push(`/venues?category=${category}`)}
+              className="flex flex-col items-center justify-center gap-2 bg-gray-800/60 border border-gray-700/50 rounded-2xl py-4 hover:border-green-500/50 hover:bg-gray-800 active:scale-95 transition-all"
             >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+              <span className="text-3xl">{emoji}</span>
+              <span className="text-xs text-gray-300">{label}</span>
+            </button>
+          ))}
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+      </section>
+
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-xs font-medium text-gray-400 uppercase tracking-wider">推薦場館</h2>
+          <Link href="/venues" className="text-xs text-green-400 hover:text-green-300">查看全部 →</Link>
         </div>
-      </main>
+        <div className="space-y-3">
+          {loading ? (
+            Array.from({ length: 3 }, (_, i) => (
+              <div key={i} className="h-20 bg-gray-800/40 rounded-2xl animate-pulse" />
+            ))
+          ) : venues.map((venue) => (
+            <Link key={venue.id} href={`/venues/${venue.id}`}>
+              <SpotlightCard className="bg-gray-800/60 border border-gray-700/50 rounded-2xl p-4 hover:border-gray-600 transition-colors block mb-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-semibold text-sm text-white truncate">{venue.name}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">{venue.city} {venue.district}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">🚇 {venue.mrt_station}站 {venue.mrt_walking_minutes}分鐘</p>
+                  </div>
+                  <div className="text-right ml-3 flex-shrink-0">
+                    <p className="text-xs text-gray-500">今日剩餘</p>
+                    <div className="flex items-baseline gap-0.5 justify-end">
+                      <CountUp to={venue.today_available_slots} className="text-xl font-bold text-green-400" />
+                      <span className="text-xs text-gray-500">場</span>
+                    </div>
+                  </div>
+                </div>
+              </SpotlightCard>
+            </Link>
+          ))}
+        </div>
+      </section>
     </div>
-  );
+  )
 }

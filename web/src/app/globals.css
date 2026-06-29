@@ -128,3 +128,29 @@
     @apply font-sans;
   }
 }
+
+/* Elder Mode Variables */
+:root {
+  --font-body: 1rem;
+  --font-title: 1.25rem;
+  --font-btn: 1rem;
+  --touch-min: 2.75rem;
+  --slot-min: 2.75rem;
+}
+
+[data-elder="true"] {
+  --font-body: 1.125rem;
+  --font-title: 1.5rem;
+  --font-btn: 1.25rem;
+  --touch-min: 3.75rem;
+  --slot-min: 3.75rem;
+}
+
+body {
+  font-size: var(--font-body);
+}
+
+button, [role="button"] {
+  min-height: var(--touch-min);
+  font-size: var(--font-btn);
+}

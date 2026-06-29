@@ -45,36 +45,6 @@ export async function getBooking(id: string): Promise<Booking | null> {
   return MOCK_BOOKINGS.find(b => b.id === id) ?? null;
 }
 
-export async function createBooking(timeSlotId: string, userId: string): Promise<Booking> {
-  await delay(300);
-  const now = new Date();
-  const paymentExpiresAt = new Date(now.getTime() + 15 * 60 * 1000);
-  const newBooking: Booking = {
-    id: `booking-${Date.now()}`,
-    timeSlotId,
-    userId,
-    status: 'pending_payment',
-    payment_expires_at: paymentExpiresAt.toISOString(),
-    created_at: now.toISOString(),
-  };
-  MOCK_BOOKINGS.push(newBooking);
-  return newBooking;
-}
-
-export async function mockPay(
-  bookingId: string,
-  channel: string
-): Promise<{ success: boolean }> {
-  await delay(1500);
-  const booking = MOCK_BOOKINGS.find(b => b.id === bookingId);
-  if (booking) {
-    booking.status = 'confirmed';
-    booking.payment_channel = channel;
-    booking.paid_at = new Date().toISOString();
-  }
-  return { success: true };
-}
-
 export async function submitCertification(
   certType: string,
   data: Record<string, string>
@@ -91,4 +61,43 @@ export async function approveCertification(
   await delay(2000);
   void certType;
   return { status: 'approved' };
+}
+
+export async function createBooking(timeSlotId: string, userId: string): Promise<Booking> {
+  await delay(300);
+  void userId;
+  // Find the slot and create a mock booking
+  const allVenues = VENUES;
+  let foundVenue = allVenues[0];
+  let foundSlot: TimeSlot | null = null;
+  for (const venue of allVenues) {
+    const slots = generateTimeSlots(venue.id, new Date().toISOString().split('T')[0]);
+    const slot = slots.find((s) => s.id === timeSlotId);
+    if (slot) { foundVenue = venue; foundSlot = slot; break; }
+  }
+  const now = new Date();
+  const expiry = new Date(now.getTime() + 15 * 60 * 1000);
+  const booking: Booking = {
+    id: `bk-${Date.now()}`,
+    order_no: `BK${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}${String(Date.now()).slice(-6)}`,
+    user_id: userId,
+    venue: foundVenue,
+    time_slot: (foundSlot as TimeSlot) ?? generateTimeSlots(foundVenue.id, now.toISOString().split('T')[0])[0],
+    status: 'pending_payment',
+    amount_twd: foundVenue.price_normal_twd,
+    final_amount_twd: foundVenue.price_normal_twd,
+    payment_expires_at: expiry.toISOString(),
+    created_at: now.toISOString(),
+    updated_at: now.toISOString(),
+  };
+  MOCK_BOOKINGS.unshift(booking);
+  return booking;
+}
+
+export async function mockPay(bookingId: string, channel: string): Promise<{ success: boolean }> {
+  await delay(1500);
+  void channel;
+  const booking = MOCK_BOOKINGS.find((b) => b.id === bookingId);
+  if (booking) { booking.status = 'paid'; booking.updated_at = new Date().toISOString(); }
+  return { success: true };
 }
